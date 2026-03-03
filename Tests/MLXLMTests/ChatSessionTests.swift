@@ -39,7 +39,7 @@ public class ChatSessionTests: XCTestCase {
             tokenizer: processor.tokenizer)
     }
 
-    private var generationParameters = GenerateParameters(maxTokens: 50)
+    private let generationParameters = GenerateParameters(maxTokens: 50)
 
     private let targetLength = 1
 
@@ -216,7 +216,8 @@ public class ChatSessionTests: XCTestCase {
         }
 
         // try another message, wait for full completion (but cap the length)
-        model.session.generateParameters = .init(maxTokens: 50)
+        model.session.generateParameters = self.generationParameters
+        model.respond("message2")
         while model.isBusy {
             try await Task.sleep(for: .milliseconds(10))
         }

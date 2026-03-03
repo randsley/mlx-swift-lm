@@ -41,11 +41,7 @@ struct TestTokenizer: Tokenizer {
 
     func encode(text: String) -> [Int] {
         (0 ..< length).enumerated().map { (index, _) in
-            if index > length {
-                _eosTokenId
-            } else {
-                Int.random(in: 1 ..< vocabularySize)
-            }
+            Int.random(in: 1 ..< vocabularySize)
         }
     }
 
