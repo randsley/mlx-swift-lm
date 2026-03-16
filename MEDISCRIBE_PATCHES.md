@@ -4,7 +4,7 @@ This branch (`mediscribe-fixes`) is based on upstream tag `2.30.6` of
 `ml-explore/mlx-swift-lm` and carries the patches listed below.
 
 **Consumer**: [randsley/MediScribe](https://github.com/randsley/MediScribe)
-**Pinned revision**: `7e6c4024ba15ccbc34f896c3441d247dcb7c39fe`
+**Pinned revision**: `27829ba91d6b1391d60f981f54b447fc8189eb61`
 
 ---
 
@@ -112,7 +112,7 @@ correct for MedGemma 4B IT.
 
 ## Patch 3 — Use `DefaultMessageGenerator` in `Gemma3Processor`
 
-**Commit**: `7e6c402`
+**Commits**: `7e6c402` (initial), `27829ba` (corrected — see below)
 **File**: `Libraries/MLXVLM/Models/Gemma3.swift`
 
 ### Problem
@@ -134,17 +134,15 @@ This affected all text-only inference (SOAP notes, referral drafting) and degrad
 
 ### Fix
 
-Replaced `Qwen2VLMessageGenerator` with `DefaultMessageGenerator`, which produces:
+Added `Gemma3MessageGenerator` (private struct inside `Gemma3Processor`) that:
+- Produces plain string content: `{"role": "user", "content": "..."}` — correct for Gemma3 Jinja template
+- Injects one `<start_of_image>` string per image from `Chat.Message.images` before the text content, so the token-expansion loop in `prepare()` can locate and replace each occurrence with 256 image tokens
 
-```swift
-["role": "user", "content": "Write a SOAP note as JSON..."]
-```
-
-This is the format the Gemma3 chat template expects.
+`DefaultMessageGenerator` was considered but rejected: it discards `Chat.Message.images` entirely, so the `<start_of_image>` token never appears in the prompt and image embedding silently breaks for vision inference.
 
 ```diff
 -        let messages = Qwen2VLMessageGenerator().generate(from: input)
-+        let messages = DefaultMessageGenerator().generate(from: input)
++        let messages = Gemma3MessageGenerator().generate(from: input)
 ```
 
 ---
