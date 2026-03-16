@@ -4,7 +4,7 @@ This branch (`mediscribe-fixes`) is based on upstream tag `2.30.6` of
 `ml-explore/mlx-swift-lm` and carries the patches listed below.
 
 **Consumer**: [randsley/MediScribe](https://github.com/randsley/MediScribe)
-**Pinned revision**: `b3ba409d730ca933b33d17215b46e58ebdf3e0e9`
+**Pinned revision**: `7e6c4024ba15ccbc34f896c3441d247dcb7c39fe`
 
 ---
 
@@ -110,6 +110,45 @@ correct for MedGemma 4B IT.
 
 ---
 
+## Patch 3 — Use `DefaultMessageGenerator` in `Gemma3Processor`
+
+**Commit**: `7e6c402`
+**File**: `Libraries/MLXVLM/Models/Gemma3.swift`
+
+### Problem
+
+`Gemma3Processor.prepare()` was calling `Qwen2VLMessageGenerator().generate(from: input)`, which wraps each message's content as an **array** of typed dicts:
+
+```swift
+[
+    "role": "user",
+    "content": [
+        ["type": "text", "text": "Write a SOAP note as JSON..."]
+    ]
+]
+```
+
+The Gemma3 chat template (both upstream and the fallback added in Patch 2) accesses `message['content'] | trim` — expecting a plain string. When it received an array, the Jinja template serialized it as a Python-style list literal, producing a garbage user turn. The model responded to the corrupted prompt with a generic greeting ("Okay, I'm ready! Tell me what you'd like me to do.") instead of the requested JSON output.
+
+This affected all text-only inference (SOAP notes, referral drafting) and degraded vision inference (imaging findings).
+
+### Fix
+
+Replaced `Qwen2VLMessageGenerator` with `DefaultMessageGenerator`, which produces:
+
+```swift
+["role": "user", "content": "Write a SOAP note as JSON..."]
+```
+
+This is the format the Gemma3 chat template expects.
+
+```diff
+-        let messages = Qwen2VLMessageGenerator().generate(from: input)
++        let messages = DefaultMessageGenerator().generate(from: input)
+```
+
+---
+
 ## Upgrading from upstream
 
 When a new upstream `ml-explore/mlx-swift-lm` release is needed:
@@ -131,6 +170,10 @@ grep -A2 "processorTypeOverrides" Libraries/MLXVLM/VLMModelFactory.swift
 # Patch 2
 grep "gemma3FallbackChatTemplate\|missingChatTemplate" Libraries/MLXVLM/Models/Gemma3.swift
 # Must show both the constant and the catch clause
+
+# Patch 3
+grep "DefaultMessageGenerator" Libraries/MLXVLM/Models/Gemma3.swift
+# Must NOT show Qwen2VLMessageGenerator in Gemma3Processor.prepare()
 ```
 
 If either was removed by a conflict or upstream change, re-apply the relevant patch manually.
