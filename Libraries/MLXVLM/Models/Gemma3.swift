@@ -1089,8 +1089,11 @@ public struct Gemma3Processor: UserInputProcessor {
         """
 
     public func prepare(input: UserInput) async throws -> LMInput {
-        // Use structured content message generator for Gemma3's chat template
-        let messages = Qwen2VLMessageGenerator().generate(from: input)
+        // Gemma3 chat template expects message['content'] as a plain string.
+        // Qwen2VLMessageGenerator wraps content as an array of dicts, causing the
+        // template to produce garbage and the model to ignore the prompt entirely.
+        // DefaultMessageGenerator produces {"role": ..., "content": "..."} (plain string).
+        let messages = DefaultMessageGenerator().generate(from: input)
 
         var promptTokens: [Int]
         do {
