@@ -344,9 +344,14 @@ public final class VLMModelFactory: ModelFactory {
 
         // Override processor type based on model type for models that need special handling
         // Mistral3 models ship with "PixtralProcessor" in their config but need Mistral3Processor
-        // to handle spatial merging correctly
+        // to handle spatial merging correctly.
+        // MedGemma / Gemma3 models ship with "PaliGemmaProcessor" in their preprocessor_config.json
+        // (MedGemma is PaliGemma2-derived architecturally) but PaliGemmaProcessor.prepare() throws
+        // VLMError.imageRequired for text-only input (0 images). Gemma3Processor handles both
+        // multimodal and text-only input correctly.
         let processorTypeOverrides: [String: String] = [
-            "mistral3": "Mistral3Processor"
+            "mistral3": "Mistral3Processor",
+            "gemma3": "Gemma3Processor",
         ]
         let processorType =
             processorTypeOverrides[baseConfig.modelType] ?? baseProcessorConfig.processorClass
