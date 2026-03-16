@@ -4,7 +4,7 @@ This branch (`mediscribe-fixes`) is based on upstream tag `2.30.6` of
 `ml-explore/mlx-swift-lm` and carries the patches listed below.
 
 **Consumer**: [randsley/MediScribe](https://github.com/randsley/MediScribe)
-**Pinned revision**: `12bc2f35ec3f2a1dca9666d4f61b7769586de39e`
+**Pinned revision**: `b3ba409d730ca933b33d17215b46e58ebdf3e0e9`
 
 ---
 
@@ -73,6 +73,43 @@ the file on disk.
 
 ---
 
+## Patch 2 — Gemma3 chat template fallback in `Gemma3Processor`
+
+**Commit**: `b3ba409`
+**File**: `Libraries/MLXVLM/Models/Gemma3.swift`
+
+### Problem
+
+`Gemma3Processor.prepare()` calls `tokenizer.applyChatTemplate(messages:)` unconditionally. Some `mlx-community` MedGemma quantizations ship a `tokenizer_config.json` that omits the `chat_template` field. When encountered, swift-transformers throws `TokenizerError.missingChatTemplate`:
+
+```
+Generation failed: This tokenizer does not have a chat template, and no template was passed.
+```
+
+This affected all text-only inference (SOAP notes, referral drafting). Vision inference also broke once Patch 1 switched MedGemma from `PaliGemmaProcessor` to `Gemma3Processor`.
+
+### Fix
+
+Catch `TokenizerError.missingChatTemplate` in `Gemma3Processor.prepare()` and retry with a hardcoded Gemma3/MedGemma Jinja fallback template passed via `.literal()`. The fallback is only used when the tokenizer configuration omits the template — if the tokenizer provides its own, it is used as before.
+
+```swift
+var promptTokens: [Int]
+do {
+    promptTokens = try tokenizer.applyChatTemplate(messages: messages)
+} catch TokenizerError.missingChatTemplate {
+    promptTokens = try tokenizer.applyChatTemplate(
+        messages: messages,
+        chatTemplate: .literal(Self.gemma3FallbackChatTemplate)
+    )
+}
+```
+
+The fallback template is the standard Gemma3 instruction-tuning template
+(`<start_of_turn>user\n…<end_of_turn>\n<start_of_turn>model\n`), which is
+correct for MedGemma 4B IT.
+
+---
+
 ## Upgrading from upstream
 
 When a new upstream `ml-explore/mlx-swift-lm` release is needed:
@@ -84,14 +121,19 @@ git fetch upstream   # add remote: git remote add upstream https://github.com/ml
 git merge <new-tag>
 ```
 
-After merging, verify the override is still present:
+After merging, verify both patches are still present:
 
 ```bash
+# Patch 1
 grep -A2 "processorTypeOverrides" Libraries/MLXVLM/VLMModelFactory.swift
+# Must include: "gemma3": "Gemma3Processor"
+
+# Patch 2
+grep "gemma3FallbackChatTemplate\|missingChatTemplate" Libraries/MLXVLM/Models/Gemma3.swift
+# Must show both the constant and the catch clause
 ```
 
-Expected output must include `"gemma3": "Gemma3Processor"`. If a conflict or
-upstream change removed it, re-apply the patch manually.
+If either was removed by a conflict or upstream change, re-apply the relevant patch manually.
 
 Then push and update the pinned revision in the MediScribe project:
 
