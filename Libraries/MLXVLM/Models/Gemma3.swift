@@ -1063,11 +1063,44 @@ public struct Gemma3Processor: UserInputProcessor {
         return (pixelValues, THW(images.count, config.imageSize, config.imageSize))
     }
 
+    // Standard Gemma3 / MedGemma chat template.
+    // Some quantized MedGemma distributions (e.g. mlx-community/medgemma-4b-it-4bit) ship a
+    // tokenizer_config.json that omits the chat_template field, causing
+    // TokenizerError.missingChatTemplate when applyChatTemplate(messages:) is called.
+    // We fall back to this hardcoded template so text-only inference (SOAP, Referrals) works
+    // without requiring operators to patch tokenizer_config.json on every device.
+    private static let gemma3FallbackChatTemplate = """
+        {{ bos_token }}\
+        {% if messages[0]['role'] == 'system' %}\
+        {{ raise_exception('System role not supported') }}\
+        {% endif %}\
+        {% for message in messages %}\
+        {% if (message['role'] == 'user') != (loop.index0 % 2 == 0) %}\
+        {{ raise_exception('Conversation roles must alternate user/assistant/user/assistant/...') }}\
+        {% endif %}\
+        {% if (message['role'] == 'assistant') %}\
+        {% set role = 'model' %}\
+        {% else %}\
+        {% set role = message['role'] %}\
+        {% endif %}\
+        {{ '<start_of_turn>' + role + '\\n' + message['content'] | trim + '<end_of_turn>\\n' }}\
+        {% endfor %}\
+        {% if add_generation_prompt %}{{'<start_of_turn>model\\n'}}{% endif %}
+        """
+
     public func prepare(input: UserInput) async throws -> LMInput {
         // Use structured content message generator for Gemma3's chat template
         let messages = Qwen2VLMessageGenerator().generate(from: input)
 
-        var promptTokens = try tokenizer.applyChatTemplate(messages: messages)
+        var promptTokens: [Int]
+        do {
+            promptTokens = try tokenizer.applyChatTemplate(messages: messages)
+        } catch TokenizerError.missingChatTemplate {
+            promptTokens = try tokenizer.applyChatTemplate(
+                messages: messages,
+                chatTemplate: .literal(Self.gemma3FallbackChatTemplate)
+            )
+        }
 
         // Process images if any
         var processedImage: LMInput.ProcessedImage?
