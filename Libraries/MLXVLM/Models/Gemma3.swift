@@ -1063,6 +1063,33 @@ public struct Gemma3Processor: UserInputProcessor {
         return (pixelValues, THW(images.count, config.imageSize, config.imageSize))
     }
 
+    // MARK: - Message Generator
+
+    // MessageGenerator for Gemma3 that produces plain string content
+    // (required by both the upstream and fallback Jinja templates which do
+    // `message['content'] | trim`), and injects one `<start_of_image>` token
+    // string per image present in the Chat.Message, so that the image-expansion
+    // loop in prepare() can locate and replace them with 256 image tokens each.
+    //
+    // Qwen2VLMessageGenerator is NOT used here: it wraps content as an array of
+    // typed dicts ([{"type":"text","text":"…"},{"type":"image"}]) which the
+    // Gemma3 template serialises as a Python list literal, producing a garbage
+    // user turn and causing the model to ignore the prompt entirely.
+    private struct Gemma3MessageGenerator: MessageGenerator {
+        func generate(message: Chat.Message) -> Message {
+            let imagePlaceholders = message.images
+                .map { _ in "<start_of_image>" }
+                .joined(separator: "\n")
+            let content = imagePlaceholders.isEmpty
+                ? message.content
+                : imagePlaceholders + "\n\n" + message.content
+            return [
+                "role": message.role.rawValue,
+                "content": content,
+            ]
+        }
+    }
+
     // Standard Gemma3 / MedGemma chat template.
     // Some quantized MedGemma distributions (e.g. mlx-community/medgemma-4b-it-4bit) ship a
     // tokenizer_config.json that omits the chat_template field, causing
@@ -1089,11 +1116,11 @@ public struct Gemma3Processor: UserInputProcessor {
         """
 
     public func prepare(input: UserInput) async throws -> LMInput {
-        // Gemma3 chat template expects message['content'] as a plain string.
-        // Qwen2VLMessageGenerator wraps content as an array of dicts, causing the
-        // template to produce garbage and the model to ignore the prompt entirely.
-        // DefaultMessageGenerator produces {"role": ..., "content": "..."} (plain string).
-        let messages = DefaultMessageGenerator().generate(from: input)
+        // Gemma3MessageGenerator produces plain string content (required by Gemma3's
+        // Jinja template which does `message['content'] | trim`) and injects
+        // <start_of_image> placeholders for any images in each Chat.Message,
+        // so the expansion loop below can replace them with 256 image tokens each.
+        let messages = Gemma3MessageGenerator().generate(from: input)
 
         var promptTokens: [Int]
         do {
